@@ -1,0 +1,225 @@
+!DOCTYPE html>
+
+<html>
+
+<head>
+    <title>Agent Ranks Export</title>
+    <script type="text/javascript"
+        src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/3.1.2/rollups/hmac-sha512.js"></script>
+    <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.3.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+
+    <script type="text/javascript">
+        let AccountID, ApiKeyID, ApiKey;
+        let Departments = {};
+        let Operators = {};
+        let ActiveDepartments = [
+            'English (Global)',
+            'English (Moscow)',
+            'English (Kuala Lumpur)',
+            'German (Budapest)',
+            'Portuguese (Miami)',
+            'Italian (Budapest)',
+            'French (Global)',
+            'Hungarian (Budapest)',
+            'Polish (Budapest)',
+            'Russian (Moscow)',
+            'Spanish (Global)',
+            "Mandarin (Kuala Lumpur)",
+            "Korean (Kuala Lumpur)",
+            "Japanese (Kuala Lumpur)"
+        ];
+
+        function buildURL(method, parameters) {
+            let auth = AccountID + ':' + ApiKeyID + ':' + (new Date()).getTime();
+            let authHash = auth + ':' + CryptoJS.SHA512(auth + ApiKey).toString(CryptoJS.enc.Hex);
+            return ('https://api.boldchat.com/aid/' + AccountID + '/data/rest/json/v1/' + method + '?auth=' + authHash + '&' + parameters);
+        }
+
+        function getDepartments() {
+            $('#output1').text('Gathering Departments...').show();
+            $.ajax({
+                type: 'GET',
+                url: buildURL('getDepartments', ''),
+                contentType: "application/json",
+                dataType: 'jsonp',
+                success: function (json) {
+                    for (let i = 0; i < json.Data.length; i++) {
+                        Departments[json.Data[i].DepartmentID] = json.Data[i].Name;
+                    }
+                    getOperators();
+                },
+                error: function (e) {
+                    $('#error').text(e.message);
+                }
+            });
+        }
+
+        function getOperators() {
+            $('#output2').text('Gathering Operators...').show();
+            $.ajax({
+                type: 'GET',
+                url: buildURL('getOperators', ''),
+                contentType: "application/json",
+                dataType: 'jsonp',
+                success: function (json) {
+                    Operators = json.Data;
+                    createFile()
+                },
+                error: function (e) {
+                    $('#error').text(e.message);
+                }
+            });
+        }
+
+        function createFile() {
+            let csvfile = null;
+            let csvtext = ',';
+
+            let IDarray = [];
+            for (let key in Departments) {
+                if (Departments.hasOwnProperty(key)) {
+                    if ($.inArray(Departments[key], ActiveDepartments) > -1) {
+                        csvtext += Departments[key] + ',';
+                        IDarray.push(key);
+                    }
+                }
+            }
+
+            csvtext += '\r\n';
+
+            Operators.sort(function (a, b) {
+                a = a.Name.replace('  ', ' ').toLowerCase();
+                b = b.Name.replace('  ', ' ').toLowerCase();
+                return (a < b) ? -1 : (a > b) ? 1 : 0;
+            });
+
+            for (let key in Operators) {
+                if (Operators.hasOwnProperty(key)) {
+                    if (Operators[key].Name.indexOf('Agent /') > -1) {
+                        let row = Operators[key].Name + ',';
+                        for (let i in IDarray) {
+                            let columnID = IDarray[i];
+                            for (let j in Operators[key].Departments) {
+                                if (Operators[key].Departments.hasOwnProperty(j)) {
+                                    if (columnID === Operators[key].Departments[j].DepartmentID) {
+                                        let priority = Operators[key].Departments[j].Priority;
+                                        switch (priority) {
+                                            case 0:
+                                                row += 'Lowest - ';
+                                                break;
+                                            case 1:
+                                                row += 'Low - ';
+                                                break;
+                                            case 2:
+                                                row += 'Normal - ';
+                                                break;
+                                            case 3:
+                                                row += 'High - ';
+                                                break;
+                                            case 4:
+                                                row += 'Highest - ';
+                                                break;
+                                            default:
+                                                row += 'Normal - ';
+                                                break;
+                                        }
+                                        row += 'Rank ' + (5 - (Operators[key].Departments[j].AssignmentPriority || 4));
+                                    }
+                                }
+                            }
+                            row += ',';
+                        }
+                        csvtext += (row + '\r\n');
+                    }
+                }
+            }
+
+            let data = new Blob([csvtext], { type: 'text/csv' });
+
+            // If we are replacing a previously generated file we need to manually revoke the object URL to avoid memory leaks.
+            if (csvfile !== null) {
+                window.URL.revokeObjectURL(csvfile);
+            }
+
+            csvfile = window.URL.createObjectURL(data);
+
+            $('#loaderIcon').hide().attr('class', 'fa fa-check').show(150);
+            $('#download').attr('href', csvfile).show(150);
+        }
+
+        $(document).ready(function () {
+            $('#api').submit(function (event) {
+                event.preventDefault();
+                $('#download, #output, #output2').hide();
+                AccountID = $('#accountID').val();
+                ApiKeyID = $('#apiKeyID').val();
+                ApiKey = $('#apiKey').val();
+
+                if (AccountID === '' || ApiKeyID === '' || ApiKey === '') {
+                    $('#loader, #output, #output2').hide();
+                    $('#error').html("<b>BoldChat API Credentials not set.</b>");
+                } else {
+                    $('#loaderIcon').attr('class', 'fa fa-circle-o-notch fa-spin');
+                    $('#loader').show();
+                    getDepartments();
+                }
+            });
+        });
+    </script>
+</head>
+
+<body>
+    <div class="container" role="main">
+        <div class="well">
+            <img src="https://s3.amazonaws.com/ps.projects/ge/GE-Logo.png" style="width: 100px;height: 100px;">
+            <h3>Agent Ranks Export</h3>
+            <h4>This tool gets the GE Departments and Agents associated with each and generates a CSV file with the
+                respective ranks using the BoldChat API.</h4>
+            <h5>The output file is a CSV which will load into Excel. Each row in the file repersents an Operator/Agent
+                and their respective ranks for each Department.<br /><br />
+                <span id="version" style="float: left"><b>v1.0</b></span>
+            </h5>
+        </div>
+    </div>
+    <div class="wrapper col-xs-12">
+        <div class="form-horizontal col-xs-6 col-xs-offset-2">
+            <form id="api">
+                <div class="form-group">
+                    <label class="control-label col-xs-3" for="accountID">Account ID:</label>
+                    <div class="col-xs-9">
+                        <input class="form-control" type="text" name="accountID" id="accountID" value="" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="control-label col-xs-3" for="apiKeyID">API Setting ID:</label>
+                    <div class="col-xs-9">
+                        <input class="form-control" type="text" name="apiKeyID" id="apiKeyID" value="" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="control-label col-xs-3" for="apiKey">API Key:</label>
+                    <div class="col-xs-9">
+                        <input class="form-control" type="text" name="apiKey" id="apiKey" value="" />
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="col-xs-6 col-xs-offset-3">
+                        <input class="btn btn-primary" type="submit" value="Get Ranks Report">
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="container">
+        <p class="text-center" id="error"></p>
+        <p class="text-center" id="output1"></p>
+        <p class="text-center" id="output2"></p>
+        <p class="text-center" id="loader"><i id="loaderIcon" style="font-size:24px"></i></p>
+        <p class="text-center"><a style="display:none" class="btn btn-default" download="ranks.csv" id="download"
+                href="">Download File</a></p>
+    </div>
+</body>
+
+</html>
